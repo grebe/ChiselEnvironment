@@ -39,10 +39,10 @@ class DSPTester[+T <: ModuleOverride](c: T, verilogTester:Boolean = DSPTester.ve
   }
 
   /** Specifying whether an input/output node is signed for Verilog TB */
-  def isSigned(n: Node): String = {
+  def isSigned(n: Node): Tuple2[Boolean,String] = {
     n match {
-      case _: SInt | _ : Flo | _: Dbl | _: DSPDbl | _: Fixed | _: DSPFixed => " signed "
-      case _ => ""
+      case _: SInt | _ : Flo | _: Dbl | _: DSPDbl | _: Fixed | _: DSPFixed => (true," signed ")
+      case _ => (false,"")
     }
   }
 
@@ -102,9 +102,9 @@ class DSPTester[+T <: ModuleOverride](c: T, verilogTester:Boolean = DSPTester.ve
 
     // Initialize inputs/outputs + setup DUT
     tb write "  // Module INPUTS\n"
-    ins   foreach (node => tb write "  reg%s[%d:0] %s = 0;\n".format(isSigned(node),node.getWidth-1, getIOName(node)))
+    ins   foreach (node => tb write "  reg%s[%d:0] %s = 0;\n".format(isSigned(node)._2,node.getWidth-1, getIOName(node)))
     tb write "  // Module OUTPUTS\n"
-    outs  foreach (node => tb write "  wire%s[%d:0] %s;\n".format(isSigned(node),node.getWidth-1, getIOName(node)))
+    outs  foreach (node => tb write "  wire%s[%d:0] %s;\n".format(isSigned(node)._2,node.getWidth-1, getIOName(node)))
     tb write "\n  // DUT Instantiation\n"
     // TODO: Check name consistency
     tb write "  %s %s(\n".format(c.moduleName, c.name)
@@ -305,6 +305,9 @@ class DSPTester[+T <: ModuleOverride](c: T, verilogTester:Boolean = DSPTester.ve
 
   /** Poke with VerilogTB */
   private def pokeTB(node:Bits, x: BigInt): Unit = {
+    val unsignedBW = x.bitLength
+    val neededWidth = if (isSigned(node)._1) unsignedBW + 1 else unsignedBW
+    if (neededWidth > node.getWidth) Error("Poke value is not in the range of the input port")
     val ioName = getIOName(node)
     if (verilogTester && node.isTopLevelIO && node.dir == INPUT)
       tb write "    %s = %d;\n".format(ioName,x)
@@ -438,8 +441,16 @@ class DSPTester[+T <: ModuleOverride](c: T, verilogTester:Boolean = DSPTester.ve
     }
     val good = {
       if (dblVal0 != expected0) {
-        val gotDiff = (bitVal - expectedBits).abs
-        (gotDiff <= tolerance)
+        data match {
+          case _: Dbl | _: DSPDbl | _: Flo => {
+            val gotDiff = math.abs(dblVal0-expected0)
+            (gotDiff <= tolDec)
+          }
+          case _ => {
+            val gotDiff = (bitVal - expectedBits).abs
+            (gotDiff <= tolerance)
+          }
+        }
       }
       else true
     }
